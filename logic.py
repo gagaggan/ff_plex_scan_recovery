@@ -10,6 +10,7 @@ from plugin import Job, PluginModuleBase
 
 from .service import EXTENSIONS, Inspector, Recovery, Store, section_for
 from .setup import P
+from .shyni import ShyniClient
 
 
 class Logic(PluginModuleBase):
@@ -18,6 +19,7 @@ class Logic(PluginModuleBase):
         'pause_playback': 'True', 'history_days': '30', 'retry_minutes': '60',
         'max_attempts': '3', 'poll_seconds': '15', 'cycles_per_run': '20',
         'folder_target': '',
+        'use_shyni': 'Auto', 'shyni_session_token': '',
     }
 
     def __init__(self, PM):
@@ -66,12 +68,29 @@ class Logic(PluginModuleBase):
         response.raise_for_status()
         root = ET.fromstring(response.content)
         # Any session, including paused/buffering, conservatively defers recovery.
-        return bool(list(root)) or int(root.get('size', '0')) > 0
+        plex_playing = bool(list(root)) or int(root.get('size', '0')) > 0
+        if plex_playing:
+            return True
+        secondary = self._shyni()
+        return secondary.playing() if secondary else False
+
+    def _shyni(self):
+        mate = self._mate()
+        use = P.ModelSetting.get('use_shyni')
+        enabled = use == 'True' or (use == 'Auto' and mate.ModelSetting.get('scan_shyni_use') == 'True')
+        if not enabled:
+            return None
+        return ShyniClient(mate.ModelSetting.get('intro_shyni_url'),mate.ModelSetting.get('intro_shyni_token'),
+            mate.ModelSetting.get('scan_shyni_path_rule') or '',P.ModelSetting.get('shyni_session_token') or '')
 
     def _enqueue(self, path, section, callback):
         with F.app.app_context():
             model = self._mate().get_module('scan').web_list_model
             item = model(path, mode='ADD', target_section_id=str(section), callback_id=callback)
+            # Recovery tracks each destination sequentially. Skip automatic fan-out
+            # for this item only; ordinary Plex Mate/GDS requests remain unchanged.
+            if hasattr(item,'shyni_status'):
+                item.shyni_status = 'SKIP'
             item.save()
             return int(item.id)
 
@@ -95,6 +114,7 @@ class Logic(PluginModuleBase):
 
     def setting_save_after(self, changes):
         self.options()
+        self._store().recheck_completed()
         self.sync_schedule()
 
     def scheduler_function(self):
@@ -114,7 +134,7 @@ class Logic(PluginModuleBase):
                     if folder is not None:
                         self.inspect_folder(folder, inspector, options)
                     else:
-                        engine = Recovery(store,inspector,self._enqueue,self._playing)
+                        engine = Recovery(store,inspector,self._enqueue,self._playing,secondary=self._shyni())
                         cycles = max(1,min(100,int(P.ModelSetting.get('cycles_per_run'))))
                         for _ in range(cycles):
                             if self.stop.is_set():
@@ -200,7 +220,13 @@ class Logic(PluginModuleBase):
             if command == 'connection':
                 playing = self._playing()
                 sections = self._inspector().sections()
-                return jsonify(ret='success',msg='Plex·DB 연결 정상 · %d개 섹션 · %s' % (len(sections),'재생 중' if playing else '재생 없음'))
+                secondary = self._shyni()
+                if secondary:
+                    # Check authenticated API without reading any remote media.
+                    roots = self._inspector().roots()
+                    if roots:
+                        secondary.get('/compat/section_by_path',path=secondary.path(roots[0][1] + '/connection-check.mkv'))
+                return jsonify(ret='success',msg='Plex·DB 연결 정상 · %d개 섹션 · %s · 샤이니 %s' % (len(sections),'재생 중' if playing else '재생 없음','연결 확인' if secondary else '검토 해제'))
             raise ValueError('지원하지 않는 명령입니다.')
         except Exception as exc:
             return jsonify(ret='danger',msg=str(exc))
