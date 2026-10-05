@@ -74,6 +74,21 @@ class RecoveryTests(unittest.TestCase):
         self.assertIsNone(s.section_for('/media2/a.mkv',roots))
         self.assertIsNone(s.section_for('/media/a.mkv',roots,4))
 
+    def test_replayed_history_does_not_reset_attempts(self):
+        self.recovery.tick({})
+        self.store.reset_cursor()
+        self.recovery.tick({})
+        self.assertEqual(self.store.rows(('queued',))[0]['attempts'],1)
+
+    def test_refresh_events_are_not_add_requests(self):
+        self.rows = [dict(self.rows[0],mode='REFRESH')]
+        self.recovery.tick({})
+        self.assertEqual(self.sent,[])
+
+    def test_selection_is_applied_before_page_limit(self):
+        self.store.add_files(['/media/a.mkv','/other/a.mkv'],[(3,'/media'),(4,'/other')])
+        self.assertEqual(self.store.rows(('pending',),1,[4])[0]['section'],4)
+
     def test_existing_queue_and_playback_fail_closed(self):
         self.inspector.active = lambda: True
         self.recovery.tick({})

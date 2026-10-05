@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+{% block content %}
+{{ macros.m_button_group([['globalSettingSaveBtn','설정 저장'],['connection_btn','Plex 연결 확인']]) }}
+<p class="mt-3">Plex 주소·토큰·DB 경로는 Plex Mate 설정을 자동 사용합니다. 사전검토는 원격 폴더를 순회하지 않고 변경 이력과 DB를 대조합니다.</p>
+<form id="setting" name="setting">
+{{ macros.setting_checkbox('pause_playback','재생 중 대기',value=arg['pause_playback'],desc=['재생·일시정지·버퍼링 세션이 있으면 사전검토와 새 복구 요청을 대기합니다. 이미 등록된 스캔을 강제로 중단하지 않습니다.']) }}
+{{ macros.setting_input_text('history_days','검토 이력 범위(일)',value=arg['history_days'],desc=['Plex Mate가 이미 삭제한 기록은 검토할 수 없습니다. 기본 30일.']) }}
+{{ macros.setting_input_text('max_attempts','최대 자동 재시도',value=arg['max_attempts']) }}
+{{ macros.setting_input_text('retry_minutes','실패 재시도 간격(분)',value=arg['retry_minutes']) }}
+{{ macros.setting_input_text('poll_seconds','검토·완료 확인 간격(초)',value=arg['poll_seconds'],desc=['최소 5초. 새 요청은 한 번에 하나만 등록합니다.']) }}
+{{ macros.setting_input_text('cycles_per_run','실행당 검토 횟수',value=arg['cycles_per_run'],desc=['검토마다 이력 최대 200개, DB 대조 최대 100개. 한도 이후 다음 예약 실행에서 이어갑니다.']) }}
+</form>
+<div id="notice" class="alert alert-secondary">설정 변경 후 저장하세요.</div>
+<script>
+$('#connection_btn').on('click',function(){globalSendCommand('connection',null,null,null,function(r){$('#notice').text(r.msg);});});
+</script>
+{% endblock %}

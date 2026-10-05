@@ -63,14 +63,17 @@ class Store:
                 section = section_for(path, roots, row['target_section_id'] or 0)
                 if section is None:
                     continue
-                ignored = row['mode'].startswith('REMOVE') or 'CANCEL' in row['status']
+                if row['mode'] not in ('ADD', 'REMOVE_FILE', 'REMOVE_FOLDER'):
+                    continue
+                ignored = row['mode'].startswith('REMOVE') or 'CANCEL' in (row['status'] or '')
                 db.execute('''INSERT INTO target(path,section,source,status,updated)
                     VALUES(?,?,?,?,?) ON CONFLICT(path,section) DO UPDATE SET
                     source=excluded.source,
                     status=CASE WHEN target.status IN ('queued','submitting') THEN target.status
                                 ELSE excluded.status END,
                     attempts=CASE WHEN target.status IN ('queued','submitting') THEN target.attempts ELSE 0 END,
-                    due=0, updated=excluded.updated''',
+                    due=0, updated=excluded.updated
+                    WHERE excluded.source > target.source''',
                     (path, section, row['id'], 'ignored' if ignored else 'pending', time.time()))
             if rows:
                 db.execute("INSERT OR REPLACE INTO state VALUES('cursor',?)", (str(rows[-1]['id']),))
@@ -86,11 +89,12 @@ class Store:
                        (target_id, stage or status, detail, time.time()))
             db.execute('DELETE FROM event WHERE id < (SELECT MAX(id)-20000 FROM event)')
 
-    def rows(self, statuses, limit=100):
+    def rows(self, statuses, limit=100, sections=()):
         with closing(self.connect()) as db:
+            section_sql = ' AND section IN (' + ','.join('?' for _ in sections) + ')' if sections else ''
             return [dict(x) for x in db.execute(
                 'SELECT * FROM target WHERE status IN (' + ','.join('?' for _ in statuses) +
-                ') AND due<=? ORDER BY id LIMIT ?', tuple(statuses) + (time.time(), limit))]
+                ') AND due<=?' + section_sql + ' ORDER BY id LIMIT ?', tuple(statuses) + (time.time(),) + tuple(sections) + (limit,))]
 
     def results(self, page=1):
         page = max(1, int(page))
@@ -100,6 +104,24 @@ class Store:
                 row['events'] = [dict(e) for e in db.execute('SELECT stage,detail,created FROM event WHERE target_id=? ORDER BY id DESC LIMIT 12', (row['id'],))]
             counts = dict(db.execute('SELECT status,COUNT(*) FROM target GROUP BY status'))
             return {'rows': rows, 'counts': counts, 'page': page, 'total': sum(counts.values())}
+
+    def reset_cursor(self):
+        with closing(self.connect()) as db, db:
+            db.execute("INSERT OR REPLACE INTO state VALUES('cursor','0')")
+
+    def add_files(self, paths, roots):
+        with closing(self.connect()) as db, db:
+            for path in paths:
+                section = section_for(path, roots)
+                if section is not None:
+                    db.execute('''INSERT INTO target(path,section,source,status,updated)
+                        VALUES(?,?,0,'pending',?) ON CONFLICT(path,section) DO UPDATE SET
+                        status='pending',due=0,attempts=0,updated=excluded.updated
+                        WHERE target.status NOT IN ('queued','submitting')''', (path,section,time.time()))
+
+    def retry(self, target_id):
+        with closing(self.connect()) as db, db:
+            db.execute("UPDATE target SET status='pending',due=0,attempts=0,updated=? WHERE id=? AND status IN ('failed','ignored','retry')", (time.time(),int(target_id)))
 
 
 class Inspector:
@@ -146,8 +168,13 @@ class Inspector:
             return dict(row) if row else None
 
     def latest_removed(self, path):
+        ancestors = [path]
+        parent = os.path.dirname(path)
+        while parent and parent != '/':
+            ancestors.append(parent)
+            parent = os.path.dirname(parent)
         with closing(readonly(self.mate_db)) as db:
-            row = db.execute('SELECT mode FROM scan_item WHERE target=? ORDER BY id DESC LIMIT 1', (path,)).fetchone()
+            row = db.execute("SELECT mode FROM scan_item WHERE target IN (" + ','.join('?' for _ in ancestors) + ") AND mode IN ('ADD','REMOVE_FILE','REMOVE_FOLDER') ORDER BY id DESC LIMIT 1", ancestors).fetchone()
             return bool(row and row[0].startswith('REMOVE'))
 
 
@@ -185,8 +212,7 @@ class Recovery:
             else:
                 self._retry(target, settings, '스캔 종료 후 DB 미등록 · ' + detail)
             return '스캔 종료 및 DB 검증 완료'
-        candidates = self.store.rows(('pending', 'retry'), 100)
-        candidates = [t for t in candidates if not selected or t['section'] in selected]
+        candidates = self.store.rows(('pending', 'retry'), 100, sorted(selected))
         registered = self.inspect.registered(candidates)
         for target in candidates:
             if (target['path'], target['section']) in registered:
