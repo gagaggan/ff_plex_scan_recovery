@@ -67,6 +67,16 @@ assert not logic.section_jobs()[0]['enabled']
 with app.app_context():
     logic.process_command('delete_section_schedule','4',None,None,None)
 assert [j['section_id'] for j in logic.section_jobs()]==[3]
+logic._store().remove_runs()
+engine=Mock();engine.tick.return_value='이력 0건 검토 · 대기 대상 0건'
+module.Recovery=Mock(return_value=engine)
+assert logic.start(sections_override=[3])['ret']=='success'
+import time
+for _ in range(100):
+    if not logic.lock.locked():break
+    time.sleep(.01)
+assert not logic.lock.locked(), 'idle worker unnecessarily waited for the polling interval'
+assert engine.tick.call_count==1
 logic.stop.set();tmp.cleanup()
 '''
         result = subprocess.run([sys.executable,'-c',code,str(Path(__file__).parents[1])],capture_output=True,text=True)
