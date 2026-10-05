@@ -153,3 +153,17 @@ class RecoveryTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class SQLiteInspectorTests(unittest.TestCase):
+    def test_soft_deleted_parts_are_not_registered(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path=str(Path(tmp)/'plex.db')
+            with sqlite3.connect(path) as db:
+                db.executescript('''CREATE TABLE media_items(id INTEGER, library_section_id INTEGER, deleted_at INTEGER);
+                    CREATE TABLE media_parts(media_item_id INTEGER,file TEXT,deleted_at INTEGER);
+                    INSERT INTO media_items VALUES(1,3,NULL),(2,3,100);
+                    INSERT INTO media_parts VALUES(1,'/media/a.mkv',NULL),(1,'/media/b.mkv',100),(2,'/media/c.mkv',NULL);''')
+            inspector=s.Inspector(path,path)
+            result=inspector.registered([{'path':'/media/'+x+'.mkv','section':3} for x in 'abc'])
+            self.assertEqual(result,{('/media/a.mkv',3)})

@@ -114,6 +114,7 @@ class Logic(PluginModuleBase):
 
     def setting_save_after(self, changes):
         self.options()
+        self._store().recheck_completed()
         self.sync_schedule()
 
     def scheduler_function(self):

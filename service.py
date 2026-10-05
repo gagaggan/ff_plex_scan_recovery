@@ -113,6 +113,10 @@ class Store:
         with closing(self.connect()) as db, db:
             db.execute("INSERT OR REPLACE INTO state VALUES('cursor','0')")
 
+    def recheck_completed(self):
+        with closing(self.connect()) as db, db:
+            db.execute("UPDATE target SET status='pending',due=0,attempts=0 WHERE status IN ('present','recovered')")
+
     def add_files(self, paths, roots):
         with closing(self.connect()) as db, db:
             for path in paths:
@@ -155,7 +159,8 @@ class Inspector:
         with closing(readonly(self.plex_db)) as db:
             rows = db.execute('''SELECT mp.file,mi.library_section_id FROM media_parts mp
                 JOIN media_items mi ON mi.id=mp.media_item_id
-                WHERE mp.file IN (''' + ','.join('?' for _ in paths) + ')', paths)
+                WHERE mp.deleted_at IS NULL AND mi.deleted_at IS NULL
+                AND mp.file IN (''' + ','.join('?' for _ in paths) + ')', paths)
             return {(r[0], int(r[1])) for r in rows}
 
     def active(self):
@@ -198,6 +203,12 @@ class Recovery:
         return plex, shyni
 
     def send_shyni(self, target):
+        if self.inspect.latest_removed(target['path']):
+            self.store.update(target['id'],'ignored','삭제 요청 확인: 샤이니 복구 제외')
+            return '삭제 대상 복구 제외'
+        if not self.exists(target['path']):
+            self.store.update(target['id'],'ignored','원본 파일 없음: 샤이니 복구 제외')
+            return '원본 없는 대상 복구 제외'
         self.store.update(target['id'],'submitting','샤이니 부분 스캔 요청 준비',backend='shyni',shyni_job=None)
         job_id = self.secondary.enqueue(target['path'],target['callback'])
         self.store.update(target['id'],'queued','샤이니 #%s' % job_id,stage='샤이니 큐 등록',backend='shyni',shyni_job=str(job_id))
