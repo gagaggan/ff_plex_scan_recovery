@@ -225,6 +225,8 @@ class Recovery:
         self.store.ingest(history, roots)
         active = self.store.rows(('queued', 'submitting'), 1)
         if active:
+            if not settings.get('submit',True):
+                return '진행 중인 복구 작업 있음: 검토 전용 실행은 새 요청하지 않음'
             target = active[0]
             if target.get('backend') == 'shyni':
                 if not self.secondary:
@@ -267,7 +269,8 @@ class Recovery:
             else:
                 self._retry(target, settings, '스캔 종료 후 DB 미등록 · ' + detail)
             return '스캔 종료 및 DB 검증 완료'
-        candidates = self.store.rows(('pending', 'retry'), 5 if self.secondary else 100, sorted(selected))
+        statuses = ('pending','retry','missing') if settings.get('submit',True) else ('pending','retry')
+        candidates = self.store.rows(statuses, 5 if self.secondary else 100, sorted(selected))
         registered = self.inspect.registered(candidates)
         for target in candidates:
             if self.inspect.latest_removed(target['path']):
@@ -278,7 +281,8 @@ class Recovery:
                 self.store.update(target['id'], 'present', '설정된 대상에 이미 등록됨', stage='파일 체크')
                 continue
             if not settings.get('submit', True):
-                return '누락 발견: ' + target['path']
+                self.store.update(target['id'],'missing','누락 확인: 검토 전용, 요청하지 않음',stage='파일 체크')
+                continue
             if self.inspect.active():
                 return '기존 Plex Mate 스캔 큐 대기'
             # Recheck just before dispatch: no filesystem/network mutation while playing.

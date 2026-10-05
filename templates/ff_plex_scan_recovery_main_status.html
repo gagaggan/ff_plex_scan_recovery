@@ -9,7 +9,7 @@
 <div class="table-responsive"><table class="table table-sm"><thead><tr><th>ID / 섹션</th><th>파일 / 결과</th><th>상세 작업</th></tr></thead><tbody id="rows"></tbody></table></div>
 <script>
 var page=1,total=0,busy=false;
-var names={pending:'검토 대기',present:'기등록 확인',queued:'스캔 대기·진행',submitting:'큐 등록 확인 필요',recovered:'복구 확인',retry:'재시도 대기',failed:'재시도 상한',ignored:'제외'};
+var names={pending:'검토 대기',missing:'누락 확인',present:'기등록 확인',queued:'스캔 대기·진행',submitting:'큐 등록 확인 필요',recovered:'복구 확인',retry:'재시도 대기',failed:'재시도 상한',ignored:'제외'};
 function stamp(t){return new Date(t*1000).toLocaleString();}
 function done(r){$('#notice').text(r.msg);refresh();}
 function refresh(){

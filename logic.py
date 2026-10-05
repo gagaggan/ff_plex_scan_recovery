@@ -142,7 +142,7 @@ class Logic(PluginModuleBase):
                             message = engine.tick(options)
                             self.set_state(message=message,last_run=time.strftime('%Y-%m-%d %H:%M:%S'))
                             P.logger.info(message)
-                            if '재생' in message or '확인 필요' in message or not submit:
+                            if '재생' in message or '확인 필요' in message or '검토 전용 실행은' in message:
                                 break
                             if self.stop.wait(max(5,int(P.ModelSetting.get('poll_seconds')))):
                                 break
