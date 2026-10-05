@@ -1,5 +1,6 @@
 """Bounded, persistent recovery. This module does not depend on FlaskFarm."""
 import os
+import json
 import sqlite3
 import time
 from contextlib import closing
@@ -41,6 +42,8 @@ class Store:
                 CREATE TABLE IF NOT EXISTS event (
                     id INTEGER PRIMARY KEY, target_id INTEGER, stage TEXT,
                     detail TEXT, created REAL);
+                CREATE TABLE IF NOT EXISTS scheduled_run (
+                    scope TEXT PRIMARY KEY, sections TEXT NOT NULL, created REAL NOT NULL);
             ''')
             columns = {r[1] for r in db.execute('PRAGMA table_info(target)')}
             for name in ('backend','shyni_job','plex_state','shyni_state'):
@@ -131,6 +134,31 @@ class Store:
         with closing(self.connect()) as db, db:
             db.execute("UPDATE target SET status='pending',due=0,attempts=0,updated=? WHERE id=? AND status IN ('failed','ignored','retry')", (time.time(),int(target_id)))
 
+    def request_run(self, scope, sections):
+        with closing(self.connect()) as db, db:
+            db.execute('INSERT OR IGNORE INTO scheduled_run VALUES(?,?,?)',
+                       (str(scope),json.dumps(sorted(set(sections))),time.time()))
+
+    def pending_runs(self):
+        with closing(self.connect()) as db:
+            return [{'scope':r['scope'],'sections':json.loads(r['sections']),'created':r['created']}
+                    for r in db.execute('SELECT * FROM scheduled_run ORDER BY created,scope')]
+
+    def pop_run(self):
+        with closing(self.connect()) as db, db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute('SELECT * FROM scheduled_run ORDER BY created,scope LIMIT 1').fetchone()
+            if row:
+                db.execute('DELETE FROM scheduled_run WHERE scope=?',(row['scope'],))
+                return {'scope':row['scope'],'sections':json.loads(row['sections'])}
+
+    def remove_runs(self, scope=None):
+        with closing(self.connect()) as db, db:
+            if scope is None:
+                db.execute('DELETE FROM scheduled_run')
+            else:
+                db.execute('DELETE FROM scheduled_run WHERE scope=?',(str(scope),))
+
 
 class Inspector:
     def __init__(self, mate_db, plex_db):
@@ -220,7 +248,7 @@ class Recovery:
             return '재생 중: 사전검토·복구 대기'
         roots = self.inspect.roots()
         selected = set(settings.get('sections', []))
-        roots = [r for r in roots if not selected or r[0] in selected]
+        # A shared history cursor must preserve other sections for later schedules.
         history = self.inspect.history(int(self.store.get('cursor')), settings.get('days', 30))
         self.store.ingest(history, roots)
         active = self.store.rows(('queued', 'submitting'), 1)

@@ -167,6 +167,30 @@ class RecoveryTests(unittest.TestCase):
         self.recovery.tick({})
         self.assertEqual(len(self.sent),1)
 
+    def test_shared_history_cursor_preserves_other_sections(self):
+        self.inspector.roots=lambda:[(3,'/media'),(4,'/other')]
+        self.rows.append(dict(self.rows[0],id=2,target='/other/show/b.mkv',target_section_id=4))
+        self.recovery.tick({'sections':[3],'submit':False})
+        self.assertEqual(self.store.results()['total'],2)
+        self.recovery.tick({'sections':[4]})
+        self.assertEqual(self.sent,['/other/show/b.mkv'])
+
+    def test_scheduled_queue_coalesces_and_survives_restart(self):
+        self.store.request_run('3',[3])
+        self.store.request_run('4',[4])
+        self.store.request_run('3',[3])
+        restored=s.Store(self.store.path)
+        self.assertEqual(len(restored.pending_runs()),2)
+        self.assertEqual(restored.pop_run()['sections'],[3])
+        self.assertEqual(restored.pop_run()['sections'],[4])
+        self.assertIsNone(restored.pop_run())
+
+    def test_schedule_disable_only_removes_its_own_pending_request(self):
+        self.store.request_run('common',[3])
+        self.store.request_run('4',[4])
+        self.store.remove_runs('common')
+        self.assertEqual(self.store.pending_runs()[0]['sections'],[4])
+
 
 if __name__ == '__main__':
     unittest.main()
