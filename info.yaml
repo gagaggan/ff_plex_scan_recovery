@@ -1,8 +1,8 @@
 title: Plex Scan Recovery
-version: '0.1.0'
+version: '0.2.0'
 package_name: ff_plex_scan_recovery
 developer: gagaggan
-description: '변경 스캔 이력·Plex DB 대조를 통한 저부하 누락 파일 복구'
+description: 'Plex·샤이니 파일 등록 대조와 대상별 저부하 누락 복구'
 home: https://github.com/gagaggan/ff_plex_scan_recovery
 more: ''
 require_plugin:

@@ -97,6 +97,59 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.recovery.tick({})
 
+    def secondary(self):
+        second = type('Secondary',(),{})()
+        second.present = False
+        second.sent = []
+        second.check = lambda path: second.present
+        def enqueue(path,callback):
+            second.sent.append((path,callback))
+            return '42'
+        second.enqueue = enqueue
+        second.job = lambda job_id: {'status':'completed'}
+        self.recovery.secondary = second
+        return second
+
+    def test_shyni_only_missing_does_not_rescan_plex(self):
+        second = self.secondary()
+        self.inspector.registered = lambda targets: {('/media/show/a.mkv',3)}
+        self.recovery.tick({})
+        self.assertEqual(self.sent,[])
+        self.assertEqual(len(second.sent),1)
+        second.present = True
+        self.recovery.tick({})
+        self.assertEqual(self.store.results()['counts']['recovered'],1)
+
+    def test_both_missing_are_scanned_sequentially(self):
+        second = self.secondary()
+        self.recovery.tick({})
+        self.assertEqual(len(self.sent),1)
+        self.assertEqual(second.sent,[])
+        target = self.store.rows(('queued',))[0]
+        self.jobs[target['callback']]['status'] = 'FINISH_ADD'
+        self.inspector.registered = lambda targets: {('/media/show/a.mkv',3)}
+        self.recovery.tick({})
+        self.assertEqual(len(second.sent),1)
+        second.present = True
+        self.recovery.tick({})
+        self.assertEqual(self.store.results()['counts']['recovered'],1)
+
+    def test_shyni_api_failure_never_becomes_missing(self):
+        second = self.secondary()
+        second.check = lambda path: (_ for _ in ()).throw(RuntimeError('auth error'))
+        with self.assertRaises(RuntimeError):
+            self.recovery.tick({})
+        self.assertEqual(self.sent,[])
+        self.assertEqual(second.sent,[])
+
+    def test_missing_shyni_library_is_not_scanned(self):
+        second = self.secondary()
+        second.check = lambda path: None
+        self.inspector.registered = lambda targets: {('/media/show/a.mkv',3)}
+        self.recovery.tick({})
+        self.assertEqual(second.sent,[])
+        self.assertEqual(self.store.results()['counts']['present'],1)
+
 
 if __name__ == '__main__':
     unittest.main()

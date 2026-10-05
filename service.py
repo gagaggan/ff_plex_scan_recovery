@@ -42,6 +42,10 @@ class Store:
                     id INTEGER PRIMARY KEY, target_id INTEGER, stage TEXT,
                     detail TEXT, created REAL);
             ''')
+            columns = {r[1] for r in db.execute('PRAGMA table_info(target)')}
+            for name in ('backend','shyni_job','plex_state','shyni_state'):
+                if name not in columns:
+                    db.execute('ALTER TABLE target ADD COLUMN ' + name + ' TEXT')
 
     def connect(self):
         db = sqlite3.connect(self.path, timeout=5)
@@ -80,7 +84,7 @@ class Store:
 
     def update(self, target_id, status, detail, stage=None, **fields):
         fields.update(status=status, detail=detail, updated=time.time())
-        if set(fields) - {'status', 'detail', 'updated', 'attempts', 'due', 'job_id', 'callback'}:
+        if set(fields) - {'status', 'detail', 'updated', 'attempts', 'due', 'job_id', 'callback', 'backend', 'shyni_job', 'plex_state', 'shyni_state'}:
             raise ValueError('Invalid update field')
         with closing(self.connect()) as db, db:
             db.execute('UPDATE target SET ' + ','.join(k + '=?' for k in fields) + ' WHERE id=?',
@@ -156,7 +160,7 @@ class Inspector:
 
     def active(self):
         with closing(readonly(self.mate_db)) as db:
-            row = db.execute("SELECT id FROM scan_item WHERE status IN ('READY','ENQUEUE_ADD_FIND','ENQUEUE_REMOVE_REMOVED','SCANNING') LIMIT 1").fetchone()
+            row = db.execute("SELECT id FROM scan_item WHERE status IN ('READY','ENQUEUE_ADD_FIND','ENQUEUE_REMOVE_REMOVED','SCANNING') OR shyni_status='RUNNING' LIMIT 1").fetchone()
             periodic = db.execute("SELECT id FROM periodic_item WHERE status='working' LIMIT 1").fetchone()
             return bool(row or periodic)
 
@@ -179,9 +183,25 @@ class Inspector:
 
 
 class Recovery:
-    def __init__(self, store, inspector, enqueue, playing, exists=os.path.isfile):
+    def __init__(self, store, inspector, enqueue, playing, exists=os.path.isfile, secondary=None):
         self.store, self.inspect = store, inspector
         self.enqueue, self.playing, self.exists = enqueue, playing, exists
+        self.secondary = secondary
+
+    def assessment(self, target, registered):
+        plex = (target['path'],target['section']) in registered
+        shyni = self.secondary.check(target['path']) if self.secondary else None
+        plex_state = '등록' if plex else '누락'
+        shyni_state = ('등록' if shyni else '누락') if shyni is not None else ('섹션 없음' if self.secondary else '사용 안함')
+        if target.get('plex_state') != plex_state or target.get('shyni_state') != shyni_state:
+            self.store.update(target['id'],target['status'],'Plex: %s / 샤이니: %s' % (plex_state,shyni_state),stage='등록 대조',plex_state=plex_state,shyni_state=shyni_state)
+        return plex, shyni
+
+    def send_shyni(self, target):
+        self.store.update(target['id'],'submitting','샤이니 부분 스캔 요청 준비',backend='shyni',shyni_job=None)
+        job_id = self.secondary.enqueue(target['path'],target['callback'])
+        self.store.update(target['id'],'queued','샤이니 #%s' % job_id,stage='샤이니 큐 등록',backend='shyni',shyni_job=str(job_id))
+        return '샤이니 파일 1개 복구 요청'
 
     def tick(self, settings):
         # Fail closed: playback/API/DB errors propagate and no new job is submitted.
@@ -195,6 +215,27 @@ class Recovery:
         active = self.store.rows(('queued', 'submitting'), 1)
         if active:
             target = active[0]
+            if target.get('backend') == 'shyni':
+                if not self.secondary:
+                    return '진행 중인 샤이니 작업 확인을 위해 샤이니 검토를 켜주세요.'
+                if not target.get('shyni_job'):
+                    # The server guarantees retries with this same key return the same job.
+                    return self.send_shyni(target)
+                job = self.secondary.job(target['shyni_job'])
+                if not job:
+                    self._retry(target,settings,'샤이니 작업 기록 없음: 등록 여부 재검토 필요')
+                    return '샤이니 작업 확인 실패'
+                if job['status'] not in ('completed','failed'):
+                    detail = '샤이니 #%s: %s' % (target['shyni_job'],job['status'])
+                    if target['detail'] != detail:
+                        self.store.update(target['id'],'queued',detail,stage='샤이니 스캔 진행')
+                    return '샤이니 완료 대기'
+                plex, shyni = self.assessment(target,self.inspect.registered([target]))
+                if plex and shyni is True:
+                    self.store.update(target['id'],'recovered','Plex·샤이니 실제 파일 등록 확인',stage='최종 등록 확인')
+                else:
+                    self._retry(target,settings,'샤이니 종료 후 등록 미확인 · ' + str(job.get('error') or job['status']))
+                return '샤이니 종료 및 등록 검증 완료'
             job = self.inspect.job(target['callback'])
             if not job:
                 # An ambiguous enqueue outcome must never silently submit a duplicate.
@@ -207,19 +248,23 @@ class Recovery:
                     self.store.update(target['id'], 'queued', detail, stage='스캔 진행', job_id=job['id'])
                 return 'Plex Mate 완료 대기 (추가 큐 없음)'
             registered = self.inspect.registered([target])
-            if (target['path'], target['section']) in registered:
+            plex, shyni = self.assessment(target,registered)
+            if plex and shyni is False:
+                return self.send_shyni(target)
+            if plex:
                 self.store.update(target['id'], 'recovered', detail, stage='Plex DB 등록 확인', job_id=job['id'])
             else:
                 self._retry(target, settings, '스캔 종료 후 DB 미등록 · ' + detail)
             return '스캔 종료 및 DB 검증 완료'
-        candidates = self.store.rows(('pending', 'retry'), 100, sorted(selected))
+        candidates = self.store.rows(('pending', 'retry'), 5 if self.secondary else 100, sorted(selected))
         registered = self.inspect.registered(candidates)
         for target in candidates:
-            if (target['path'], target['section']) in registered:
-                self.store.update(target['id'], 'present', '이미 Plex DB에 등록됨', stage='파일 체크')
-                continue
             if self.inspect.latest_removed(target['path']):
                 self.store.update(target['id'], 'ignored', '최근 삭제 요청: 복구 제외')
+                continue
+            plex, shyni = self.assessment(target,registered)
+            if plex and shyni is not False:
+                self.store.update(target['id'], 'present', '설정된 대상에 이미 등록됨', stage='파일 체크')
                 continue
             if not settings.get('submit', True):
                 return '누락 발견: ' + target['path']
@@ -233,13 +278,16 @@ class Recovery:
                 continue
             attempts = target['attempts'] + 1
             callback = '%s_%s-%s' % (PREFIX, target['id'], attempts)
-            self.store.update(target['id'], 'submitting', '누락 확인: 큐 등록 준비', stage='파일 체크', attempts=attempts, callback=callback)
+            self.store.update(target['id'], 'submitting', '누락 확인: 큐 등록 준비', stage='파일 체크', attempts=attempts, callback=callback,backend='plex',shyni_job=None,job_id=None)
+            target = dict(target,callback=callback,attempts=attempts)
+            if plex and shyni is False:
+                return self.send_shyni(target)
             try:
                 job_id = self.enqueue(target['path'], target['section'], callback)
             except Exception:
                 # Preserve reservation; on the next cycle reconcile by callback.
                 raise
-            self.store.update(target['id'], 'queued', 'Plex Mate #%s' % job_id, stage='큐 등록', job_id=job_id)
+            self.store.update(target['id'], 'queued', 'Plex Mate #%s' % job_id, stage='큐 등록', job_id=job_id,backend='plex')
             return '폴더 1개 복구 요청: ' + os.path.dirname(target['path'])
         return '이력 %d건 검토 · 대기 대상 %d건' % (len(history), len(candidates))
 

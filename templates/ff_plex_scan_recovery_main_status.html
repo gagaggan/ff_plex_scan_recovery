@@ -23,7 +23,7 @@ function refresh(){
   var body=$('#rows').empty();
   d.rows.forEach(function(x){
    var row=$('<tr>').appendTo(body);$('<td>').text('#'+x.id+' / '+x.section).appendTo(row);
-   var info=$('<td>').appendTo(row);$('<div>').text(x.path).css('word-break','break-all').appendTo(info);$('<div>').text((names[x.status]||x.status)+' · '+x.detail+' · 시도 '+x.attempts).appendTo(info);
+   var info=$('<td>').appendTo(row);$('<div>').text(x.path).css('word-break','break-all').appendTo(info);$('<div>').text('Plex: '+(x.plex_state||'검토 전')+' / 샤이니: '+(x.shyni_state||'검토 전')).appendTo(info);$('<div>').text((names[x.status]||x.status)+' · '+x.detail+' · 시도 '+x.attempts).appendTo(info);
    if(['failed','ignored','retry'].indexOf(x.status)>=0)$('<button class="btn btn-sm btn-outline-secondary">재검토</button>').on('click',function(){globalSendCommand('retry',String(x.id),null,null,done);}).appendTo(info);
    var events=$('<td>').appendTo(row);x.events.slice().reverse().forEach(function(e){$('<div>').text(stamp(e.created)+' ('+e.stage+') '+e.detail).appendTo(events);});
   });
