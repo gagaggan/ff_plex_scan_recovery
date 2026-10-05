@@ -1,0 +1,38 @@
+{% extends 'base.html' %}
+{% block content %}
+{{ macros.m_button_group([['run_btn','검토·복구 실행'],['stop_btn','중단']]) }}
+<div id="progress" class="alert alert-info mt-3">상태 불러오는 중</div>
+<div id="notice" class="alert alert-secondary"></div>
+<p>기록에 없는 파일은 아래에 하위 폴더 경로를 지정해 검토 대상으로 추가할 수 있습니다. 폴더 하나의 파일명만 확인하며, 하위 폴더는 순회하지 않습니다.</p>
+<div class="input-group mb-3"><input id="folder" class="form-control" placeholder="/mnt/gds2/GDRIVE/VIDEO/.../작품 폴더"><div class="input-group-append"><button id="folder_btn" class="btn btn-outline-primary">폴더 검토</button></div></div>
+<div class="mb-2"><button id="prev" class="btn btn-sm btn-secondary">이전</button> <span id="page"></span> <button id="next" class="btn btn-sm btn-secondary">다음</button> · 페이지당 100개</div>
+<div class="table-responsive"><table class="table table-sm"><thead><tr><th>ID / 섹션</th><th>파일 / 결과</th><th>상세 작업</th></tr></thead><tbody id="rows"></tbody></table></div>
+<script>
+var page=1,total=0,busy=false;
+var names={pending:'검토 대기',present:'기등록 확인',queued:'스캔 대기·진행',submitting:'큐 등록 확인 필요',recovered:'복구 확인',retry:'재시도 대기',failed:'재시도 상한',ignored:'제외'};
+function stamp(t){return new Date(t*1000).toLocaleString();}
+function done(r){$('#notice').text(r.msg);refresh();}
+function refresh(){
+ if(busy)return;busy=true;
+ globalSendCommand('status',String(page),null,null,function(r){
+  busy=false;if(!r.data){$('#notice').text(r.msg);return;}
+  var d=r.data,c=d.counts;total=d.total;
+  var checked=(c.present||0)+(c.recovered||0)+(c.ignored||0)+(c.failed||0);
+  $('#progress').text(d.worker.message+' · 발견된 대상 '+total+'개 / 판정 완료 '+checked+'개 / 스캔 '+((c.queued||0)+(c.submitting||0))+'개 / 재시도 '+(c.retry||0)+'개 · 진행률 '+(total?Math.floor(checked*100/total):0)+'% (이력 검토 중 총수 증가 가능)');
+  $('#page').text(page+' / '+Math.max(1,Math.ceil(total/100)));$('#prev').prop('disabled',page===1);$('#next').prop('disabled',page*100>=total);
+  var body=$('#rows').empty();
+  d.rows.forEach(function(x){
+   var row=$('<tr>').appendTo(body);$('<td>').text('#'+x.id+' / '+x.section).appendTo(row);
+   var info=$('<td>').appendTo(row);$('<div>').text(x.path).css('word-break','break-all').appendTo(info);$('<div>').text((names[x.status]||x.status)+' · '+x.detail+' · 시도 '+x.attempts).appendTo(info);
+   if(['failed','ignored','retry'].indexOf(x.status)>=0)$('<button class="btn btn-sm btn-outline-secondary">재검토</button>').on('click',function(){globalSendCommand('retry',String(x.id),null,null,done);}).appendTo(info);
+   var events=$('<td>').appendTo(row);x.events.slice().reverse().forEach(function(e){$('<div>').text(stamp(e.created)+' ('+e.stage+') '+e.detail).appendTo(events);});
+  });
+ });
+}
+$('#run_btn').on('click',function(){globalSendCommand('run',null,null,null,done);});
+$('#stop_btn').on('click',function(){globalSendCommand('stop',null,null,null,done);});
+$('#folder_btn').on('click',function(){globalSendCommand('folder',$('#folder').val(),null,null,done);});
+$('#prev').on('click',function(){if(page>1){page--;refresh();}});$('#next').on('click',function(){if(page*100<total){page++;refresh();}});
+refresh();var timer=setInterval(refresh,15000);window.addEventListener('beforeunload',function(){clearInterval(timer);});
+</script>
+{% endblock %}

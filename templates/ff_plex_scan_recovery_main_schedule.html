@@ -1,0 +1,24 @@
+{% extends 'base.html' %}
+{% block content %}
+{% if arg.error %}<div class="alert alert-danger">{{arg.error}}</div>{% endif %}
+<p>대상 섹션을 선택하세요. 아무것도 선택하지 않으면 변경 이력이 있는 모든 섹션을 검토합니다.</p>
+<select id="sections" class="form-control" multiple size="10">
+{% for section in arg.sections_list %}<option value="{{section.id}}" {% if section.id|string in arg.sections.split(',') %}selected{% endif %}>{{section.id}} · {{section.name}}</option>{% endfor %}
+</select>
+<button class="btn btn-primary mt-2" id="sections_save">섹션 저장</button>
+<form id="setting" name="setting" class="mt-3">
+{{ macros.setting_input_text('schedule','자동 복구 주기',value=arg.schedule,desc=['기본: 5분마다. 이전 작업이 실행 중이면 중복 실행하지 않습니다.']) }}
+</form>
+{{ macros.m_button_group([['globalSettingSaveBtn','주기 저장'],['enable_btn','자동 복구 켜기'],['disable_btn','자동 복구 끄기'],['inspect_btn','검토만 실행'],['run_btn','검토·복구 실행']]) }}
+<p id="scheduled" class="mt-3"></p><div id="notice" class="alert alert-secondary"></div>
+<script>
+function done(r){$('#notice').text(r.msg);refresh();}
+function refresh(){globalSendCommand('status','1',null,null,function(r){if(r.data)$('#scheduled').text('자동 복구: '+(r.data.scheduled?'등록됨':'해제됨'));});}
+$('#sections_save').on('click',function(){globalSendCommand('sections',($('#sections').val()||[]).join(','),null,null,done);});
+$('#enable_btn').on('click',function(){globalSendCommand('schedule','true',null,null,done);});
+$('#disable_btn').on('click',function(){globalSendCommand('schedule','false',null,null,done);});
+$('#inspect_btn').on('click',function(){globalSendCommand('inspect',null,null,null,done);});
+$('#run_btn').on('click',function(){globalSendCommand('run',null,null,null,done);});
+refresh();
+</script>
+{% endblock %}
