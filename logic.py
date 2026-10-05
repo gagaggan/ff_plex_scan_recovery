@@ -236,6 +236,7 @@ class Logic(PluginModuleBase):
                         for _ in range(cycles):
                             if self.stop.is_set():
                                 break
+                            cursor_before = store.get('cursor')
                             message = engine.tick(options)
                             self.set_state(message=message,last_run=time.strftime('%Y-%m-%d %H:%M:%S'))
                             P.logger.info(message)
@@ -243,6 +244,11 @@ class Logic(PluginModuleBase):
                                 store.request_run(run_scope,sections_override)
                                 deferred = True
                             if '재생' in message or '확인 필요' in message or '검토 전용 실행은' in message:
+                                break
+                            statuses = ('pending','retry','missing') if submit else ('pending','retry')
+                            if (store.get('cursor') == cursor_before
+                                    and not store.rows(statuses,1,options['sections'])
+                                    and not store.rows(('queued','submitting'),1)):
                                 break
                             if self.stop.wait(max(5,int(P.ModelSetting.get('poll_seconds')))):
                                 break
