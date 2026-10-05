@@ -1,19 +1,39 @@
 {% extends 'base.html' %}
 {% block content %}
 {% if arg.error %}<div class="alert alert-danger">{{arg.error}}</div>{% endif %}
+<h5>섹션별 예약</h5>
+<p>섹션마다 다른 크론식 또는 분 단위 주기를 지정할 수 있습니다. 실행이 겹치면 대기 큐에 보관해 하나씩 처리합니다.</p>
+<div class="form-row mb-2">
+<div class="col"><select id="section_id" class="form-control">{% for section in arg.sections_list %}<option value="{{section.id}}">{{section.id}} · {{section.name}}</option>{% endfor %}</select></div>
+<div class="col"><input id="section_cron" class="form-control" value="0 3 * * *" placeholder="크론식 또는 분 단위 숫자"></div>
+<div class="col-auto"><label><input type="checkbox" id="section_enabled" checked> 자동 등록</label></div>
+<div class="col-auto"><button class="btn btn-primary" id="section_save">추가·수정</button></div>
+</div>
+<small>예: 새벽 3시 <code>0 3 * * *</code>, 30분마다 <code>*/30 * * * *</code>. 기존 항목의 수정 버튼을 누른 뒤 저장하세요.</small>
+<table class="table table-sm mt-2"><thead><tr><th>섹션</th><th>주기</th><th>예약 상태</th><th>동작</th></tr></thead><tbody id="section_jobs"></tbody></table>
+<div id="pending" class="alert alert-secondary"></div>
+<hr><h5>공통 예약 및 수동 실행</h5>
 <p>대상 섹션을 선택하세요. 아무것도 선택하지 않으면 변경 이력이 있는 모든 섹션을 검토합니다.</p>
+<p>공통 예약은 개별 예약이 켜진 섹션을 제외합니다. 아래 수동 검토·복구 버튼은 선택 섹션 전체에 적용됩니다. 개별 예약은 공통 예약과 독립적으로 켜고 끌 수 있습니다.</p>
 <select id="sections" class="form-control" multiple size="10">
 {% for section in arg.sections_list %}<option value="{{section.id}}" {% if section.id|string in arg.sections.split(',') %}selected{% endif %}>{{section.id}} · {{section.name}}</option>{% endfor %}
 </select>
 <button class="btn btn-primary mt-2" id="sections_save">섹션 저장</button>
 <form id="setting" name="setting" class="mt-3">
-{{ macros.setting_input_text('schedule','자동 복구 주기',value=arg.schedule,desc=['기본: 5분마다. 이전 작업이 실행 중이면 중복 실행하지 않습니다.']) }}
+{{ macros.setting_input_text('schedule','공통 자동 복구 주기',value=arg.schedule,desc=['기본: 5분마다. 개별 예약이 켜진 섹션은 제외합니다.']) }}
 </form>
-{{ macros.m_button_group([['globalSettingSaveBtn','주기 저장'],['enable_btn','자동 복구 켜기'],['disable_btn','자동 복구 끄기'],['inspect_btn','검토만 실행'],['run_btn','검토·복구 실행']]) }}
+{{ macros.m_button_group([['globalSettingSaveBtn','공통 주기 저장'],['enable_btn','공통 예약 켜기'],['disable_btn','공통 예약 끄기'],['inspect_btn','검토만 실행'],['run_btn','검토·복구 실행']]) }}
 <p id="scheduled" class="mt-3"></p><div id="notice" class="alert alert-secondary"></div>
 <script>
 function done(r){$('#notice').text(r.msg);refresh();}
-function refresh(){globalSendCommand('status','1',null,null,function(r){if(r.data)$('#scheduled').text('자동 복구: '+(r.data.scheduled?'등록됨':'해제됨'));});}
+function refresh(){globalSendCommand('status','1',null,null,function(r){if(!r.data)return;var d=r.data;$('#scheduled').text('공통 자동 복구: '+(d.scheduled?'등록됨':'해제됨'));
+var body=$('#section_jobs').empty();(d.section_schedules||[]).forEach(function(j){var row=$('<tr>').appendTo(body);$('<td>').text(j.section_id+' · '+j.name).appendTo(row);$('<td>').text(j.schedule).appendTo(row);$('<td>').text(j.registered?'등록됨':(j.enabled?'등록 실패':'수동')).appendTo(row);var actions=$('<td>').appendTo(row);
+$('<button class="btn btn-sm btn-outline-primary mr-1">수정</button>').on('click',function(){$('#section_id').val(String(j.section_id));$('#section_cron').val(j.schedule);$('#section_enabled').prop('checked',j.enabled);}).appendTo(actions);
+$('<button class="btn btn-sm btn-outline-secondary mr-1">'+(j.enabled?'예약 해제':'예약 등록')+'</button>').on('click',function(){globalSendCommand('save_section_schedule',String(j.section_id),j.schedule,j.enabled?'false':'true',done);}).appendTo(actions);
+$('<button class="btn btn-sm btn-outline-success mr-1">실행</button>').on('click',function(){globalSendCommand('run_section',String(j.section_id),null,null,done);}).appendTo(actions);
+$('<button class="btn btn-sm btn-outline-danger">삭제</button>').on('click',function(){globalSendCommand('delete_section_schedule',String(j.section_id),null,null,done);}).appendTo(actions);
+});$('#pending').text('섹션 예약 대기 '+(d.pending_runs||[]).length+'개'+((d.pending_runs||[]).length?' · '+d.pending_runs.map(function(x){return x.sections.join(',');}).join(' → '):''));});}
+$('#section_save').on('click',function(){globalSendCommand('save_section_schedule',$('#section_id').val(),$('#section_cron').val(),$('#section_enabled').prop('checked')?'true':'false',done);});
 $('#sections_save').on('click',function(){globalSendCommand('sections',($('#sections').val()||[]).join(','),null,null,done);});
 $('#enable_btn').on('click',function(){globalSendCommand('schedule','true',null,null,done);});
 $('#disable_btn').on('click',function(){globalSendCommand('schedule','false',null,null,done);});

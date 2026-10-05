@@ -18,7 +18,7 @@ function refresh(){
   busy=false;if(!r.data){$('#notice').text(r.msg);return;}
   var d=r.data,c=d.counts;total=d.total;
   var checked=(c.present||0)+(c.recovered||0)+(c.ignored||0)+(c.failed||0);
-  $('#progress').text(d.worker.message+' · 발견된 대상 '+total+'개 / 판정 완료 '+checked+'개 / 스캔 '+((c.queued||0)+(c.submitting||0))+'개 / 재시도 '+(c.retry||0)+'개 · 진행률 '+(total?Math.floor(checked*100/total):0)+'% (이력 검토 중 총수 증가 가능)');
+  $('#progress').text(d.worker.message+' · 실행 섹션 '+((d.worker.sections||[]).join(',')||'선택 전체')+' · 섹션 예약 대기 '+(d.pending_runs||[]).length+'개 · 발견된 대상 '+total+'개 / 판정 완료 '+checked+'개 / 스캔 '+((c.queued||0)+(c.submitting||0))+'개 / 재시도 '+(c.retry||0)+'개 · 진행률 '+(total?Math.floor(checked*100/total):0)+'% (이력 검토 중 총수 증가 가능)');
   $('#page').text(page+' / '+Math.max(1,Math.ceil(total/100)));$('#prev').prop('disabled',page===1);$('#next').prop('disabled',page*100>=total);
   var body=$('#rows').empty();
   d.rows.forEach(function(x){
