@@ -1,5 +1,5 @@
 title: Plex Scan Recovery
-version: '0.3.1'
+version: '0.3.2'
 package_name: ff_plex_scan_recovery
 developer: gagaggan
 description: 'Plex·샤이니 파일 등록 대조와 대상별 저부하 누락 복구'

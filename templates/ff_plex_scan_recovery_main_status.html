@@ -33,6 +33,6 @@ $('#run_btn').on('click',function(){globalSendCommand('run',null,null,null,done)
 $('#stop_btn').on('click',function(){globalSendCommand('stop',null,null,null,done);});
 $('#folder_btn').on('click',function(){globalSendCommand('folder',$('#folder').val(),null,null,done);});
 $('#prev').on('click',function(){if(page>1){page--;refresh();}});$('#next').on('click',function(){if(page*100<total){page++;refresh();}});
-refresh();var timer=setInterval(refresh,15000);window.addEventListener('beforeunload',function(){clearInterval(timer);});
+$(document).ready(function(){refresh();var timer=setInterval(refresh,15000);window.addEventListener('beforeunload',function(){clearInterval(timer);});});
 </script>
 {% endblock %}
