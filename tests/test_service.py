@@ -150,6 +150,23 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(second.sent,[])
         self.assertEqual(self.store.results()['counts']['present'],1)
 
+    def test_review_only_never_submits_followup_shyni_job(self):
+        second=self.secondary()
+        self.recovery.tick({})
+        target=self.store.rows(('queued',))[0]
+        self.jobs[target['callback']]['status']='FINISH_ADD'
+        self.inspector.registered=lambda targets: {('/media/show/a.mkv',3)}
+        self.recovery.tick({'submit':False})
+        self.assertEqual(second.sent,[])
+
+    def test_review_only_checks_all_page_candidates(self):
+        self.rows.append(dict(self.rows[0],id=2,target='/media/show/b.mkv'))
+        self.recovery.tick({'submit':False})
+        self.assertEqual(self.sent,[])
+        self.assertEqual(self.store.results()['counts']['missing'],2)
+        self.recovery.tick({})
+        self.assertEqual(len(self.sent),1)
+
 
 if __name__ == '__main__':
     unittest.main()
